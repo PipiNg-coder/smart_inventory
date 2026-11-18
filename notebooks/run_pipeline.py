@@ -15,7 +15,7 @@ if MODE not in {"train_predict", "predict_only"}:
     raise ValueError("PIPELINE_MODE phải là train_predict hoặc predict_only")
 if MODE == "predict_only" and not pathlib.Path("lightgbm_ton_kho.joblib").is_file():
     raise FileNotFoundError(
-        "Thiếu notebooks/lightgbm_ton_kho.joblib. "
+        "Thiếu lightgbm_ton_kho.joblib trong thư mục làm việc. "
         "Cần chạy train_predict thành công trước khi chạy predict_only."
     )
 
