@@ -87,9 +87,16 @@ def doi_sang_du_doan_rong(du_doan_ngay):
     thong_ke['du_bao_30'] = (thong_ke['tb_ngay'] * 30.0).astype(float)
     return thong_ke.reset_index()[['sku', 'ngay_du_bao', 'du_bao_7', 'du_bao_30']]
 
-# Huấn luyện lại mô hình cuối trên toàn bộ dữ liệu
-mo_hinh_cuoi, thong_tin_cuoi = huan_luyen_cuoi(d, mo_hinh, hoc_d, chinh_d, thi_d)
-cach_thang_toan_cuc = diem_tat_ca.iloc[0]['Cach']
+# 00:00/12:00: huấn luyện mô hình cuối. 06:00/18:00: tải mô hình đã lưu.
+if CHE_DO_PIPELINE == 'predict_only':
+    _artifact = joblib.load('lightgbm_ton_kho.joblib')
+    mo_hinh_cuoi = _artifact['mo_hinh']
+    thong_tin_cuoi = _artifact['thong_tin']
+    cach_thang_toan_cuc = _artifact.get('cach_thang', diem_tat_ca.iloc[0]['Cach'])
+    print('Chế độ predict_only: dùng mô hình đã lưu, không huấn luyện lại.')
+else:
+    mo_hinh_cuoi, thong_tin_cuoi = huan_luyen_cuoi(d, mo_hinh, hoc_d, chinh_d, thi_d)
+    cach_thang_toan_cuc = diem_tat_ca.iloc[0]['Cach']
 cach_thang = cach_thang_toan_cuc
 print(f'Cách thắng toàn cục theo {TIEU_CHI_CHON}: {cach_thang_toan_cuc}')
 
@@ -126,7 +133,8 @@ luu_bigquery(du_doan, 'du_doan', schema=[
 
 # ---------- 5) Lưu mô hình ----------
 joblib.dump({'mo_hinh': mo_hinh_cuoi, 'thong_tin': thong_tin_cuoi, 'horizon': HORIZON,
-             'cach_du_doan': 'hybrid_lgbm_sba', 'cac_cot': CAC_COT_SO}, 'lightgbm_ton_kho.joblib')
+             'cach_du_doan': 'hybrid_lgbm_sba', 'cac_cot': CAC_COT_SO,
+             'cach_thang': cach_thang_toan_cuc}, 'lightgbm_ton_kho.joblib')
 print('Đã lưu file mô hình: lightgbm_ton_kho.joblib')
 try:
     from google.colab import files
