@@ -1,0 +1,58 @@
+name: Train and Predict (00:00 and 12:00 VN)
+
+on:
+  schedule:
+    - cron: '0 5,17 * * *'   # 05:00 và 17:00 UTC = 12:00 và 00:00 giờ Việt Nam
+  workflow_dispatch:
+    inputs:
+      ghi_that:
+        description: 'Ghi thật phiếu vào BigQuery (bỏ chọn = chỉ xem trước bước đồng bộ)'
+        type: boolean
+        default: false
+      chay_mo_hinh:
+        description: 'Chạy huấn luyện + dự báo (ghi đè các bảng dự báo)'
+        type: boolean
+        default: true
+
+concurrency:
+  group: shelfsense-bigquery-write   # dùng chung với workflow đồng bộ để không chạy chồng
+  cancel-in-progress: false
+
+jobs:
+  train-predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ml.txt
+
+      - name: Authenticate Google Cloud
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS" > "$RUNNER_TEMP/gcp_key.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp_key.json" >> "$GITHUB_ENV"
+
+      - name: Đồng bộ phiếu kho (script 07)
+        env:
+          CHI_XEM_TRUOC: ${{ (github.event_name == 'schedule' || inputs.ghi_that) && '0' || '1' }}
+          GOM_PHIEU_HOM_NAY: '1'      # gom cả hôm nay; script 07 tự tính lại các ngày chưa đủ nên không lệch tồn kho
+          XAC_NHAN_GHI_THAT: '1'
+        run: python scripts/07_dong_bo_phieu_sua.py
+
+      - name: Huấn luyện + dự báo (cùng một tiến trình)
+        if: github.event_name == 'schedule' || inputs.chay_mo_hinh
+        run: python notebooks/run_pipeline.py
+
+      - name: Xóa khóa
+        if: always()
+        run: rm -f "$RUNNER_TEMP/gcp_key.json"
