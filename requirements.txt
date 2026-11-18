@@ -1,0 +1,15 @@
+streamlit
+fastapi
+uvicorn[standard]
+pydantic>=2
+google-cloud-bigquery
+google-auth
+pandas
+db-dtypes
+pyarrow
+numpy
+lightgbm
+scikit-learn
+joblib
+matplotlib
+lunardate
