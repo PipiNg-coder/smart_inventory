@@ -1,16 +1,20 @@
-name: Train and Predict (00:00 and 12:00 VN)
+name: Train and Predict ShelfSense
 
 on:
   schedule:
-    # 05:00 and 17:00 UTC = 12:00 and 00:00 Vietnam time
+    # Giờ Việt Nam: 00:00/12:00 huấn luyện; 06:00/18:00 chỉ dự báo.
     - cron: '0 5,17 * * *'
+    - cron: '0 11,23 * * *'
   workflow_dispatch:
     inputs:
-      chay_mo_hinh:
-        description: 'Run model training and forecast, then write forecast tables to BigQuery'
-        type: boolean
+      mode:
+        description: 'Chọn chế độ chạy'
+        type: choice
         required: true
-        default: true
+        default: train_predict
+        options:
+          - train_predict
+          - predict_only
 
 concurrency:
   group: shelfsense-bigquery-write
@@ -27,6 +31,30 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
+          cache-dependency-path: requirements-ml.txt
+
+      # Cache dùng để mang model qua các runner độc lập.
+      # Prefix restore giúp lần chạy 06:00/18:00 lấy model từ lần train gần nhất.
+      - name: Restore saved model
+        uses: actions/cache@v4
+        with:
+          path: notebooks/lightgbm_ton_kho.joblib
+          key: shelfsense-model-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            shelfsense-model-
+
+      - name: Determine pipeline mode
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${{ inputs.mode }}"
+          elif [ "${{ github.event.schedule }}" = "0 11,23 * * *" ]; then
+            MODE="predict_only"
+          else
+            MODE="train_predict"
+          fi
+          echo "PIPELINE_MODE=$MODE" >> "$GITHUB_ENV"
+          echo "Pipeline mode: $MODE"
 
       - name: Install ML dependencies
         run: |
@@ -41,8 +69,11 @@ jobs:
           printf '%s' "$GOOGLE_CREDENTIALS" > "$RUNNER_TEMP/gcp_key.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp_key.json" >> "$GITHUB_ENV"
 
-      - name: Train model and generate forecasts
-        if: github.event_name == 'schedule' || inputs.chay_mo_hinh
+      - name: Check saved model for predict-only mode
+        if: env.PIPELINE_MODE == 'predict_only'
+        run: test -s notebooks/lightgbm_ton_kho.joblib || (echo "No saved model cache. Run train_predict first." && exit 1)
+
+      - name: Run pipeline
         run: python notebooks/run_pipeline.py
 
       - name: Remove credentials
