@@ -5,11 +5,19 @@ on:
     - cron: "17 */3 * * *"
       timezone: "Asia/Ho_Chi_Minh"
 
-  # Cho phép bấm chạy thủ công để kiểm tra
+  # Cho phep chay thu cong; mac dinh chi xem truoc.
   workflow_dispatch:
+    inputs:
+      ghi_that:
+        description: "Ghi that vao BigQuery (mac dinh bo chon = chi xem truoc)"
+        type: boolean
+        required: true
+        default: false
 
+# Dung chung mot nhom voi cac workflow khac cung ghi BigQuery
+# de tranh hai tien trinh dong bo chay chong len nhau.
 concurrency:
-  group: dong-bo-bigquery
+  group: shelfsense-bigquery-write
   cancel-in-progress: false
 
 jobs:
@@ -25,6 +33,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
       - name: Cai dat thu vien
         run: |
@@ -35,8 +44,19 @@ jobs:
         env:
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
         run: |
-          echo "$GCP_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/service-account.json"
+          test -n "$GCP_SERVICE_ACCOUNT_JSON" || (echo "Thieu GitHub Secret GCP_SERVICE_ACCOUNT_JSON" && exit 1)
+          printf '%s' "$GCP_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/service-account.json" >> "$GITHUB_ENV"
 
-      - name: Dong bo du lieu BigQuery
-        run: python 07_dong_bo_phieu_an_toan.py
+      - name: Dong bo du lieu BigQuery (script 07)
+        env:
+          # Lich tu dong: ghi that. Chay thu cong: mac dinh xem truoc,
+          # chi ghi that khi nguoi dung tick ghi_that.
+          CHI_XEM_TRUOC: ${{ (github.event_name == 'schedule' || inputs.ghi_that) && '0' || '1' }}
+          XAC_NHAN_GHI_THAT: "1"
+          GOM_PHIEU_HOM_NAY: "1"
+        run: python scripts/07_dong_bo_phieu_sua.py
+
+      - name: Xoa khoa
+        if: always()
+        run: rm -f "$RUNNER_TEMP/service-account.json"
