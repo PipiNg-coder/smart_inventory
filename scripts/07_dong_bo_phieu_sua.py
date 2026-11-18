@@ -176,13 +176,24 @@ def lap_ke_hoach(
     )
 
     that = cho[trang_thai == "DA_DONG_BO"].copy()
-    tinh = pd.concat([cu, that], ignore_index=True) if not cu.empty else that.copy()
+    # Giu day du movement tu sau snapshot goc de tinh ton lien tuc.
+    # Fact_sales chi can tinh lai trong cua so tu -> han.
+    tinh_day_du = pd.concat([cu, that], ignore_index=True) if not cu.empty else that.copy()
+    tinh_day_du = tinh_day_du[
+        (tinh_day_du["ngay"] > inv_cuoi) & (tinh_day_du["ngay"] <= han)
+    ].copy()
 
-    # Chi tinh lai movement nam trong cua so dang thay the.
-    tinh = tinh[(tinh["ngay"] >= tu) & (tinh["ngay"] <= han)].copy()
+    tinh_trong_cua_so = tinh_day_du[
+        (tinh_day_du["ngay"] >= tu) & (tinh_day_du["ngay"] <= han)
+    ].copy()
 
-    fs = tinh_fact_sales(tinh)
-    fi = tinh_fact_inventory(ton_cuoi, tinh, inv_cuoi, han, gap_het)
+    fs = tinh_fact_sales(tinh_trong_cua_so)
+
+    # Tinh ton tu snapshot goc, bao gom movement truoc ngay tu; sau do
+    # chi dua cac ngay tu -> han vao staging de khong cham vao lich su.
+    fi = tinh_fact_inventory(ton_cuoi, tinh_day_du, inv_cuoi, han, gap_het)
+    fi = fi[fi["ngay"].between(tu, han)].copy()
+
     ton_moi = tinh_ton_hien_tai(ton, that)
 
     return {
@@ -331,22 +342,6 @@ def main() -> None:
 
     tu = tinh_tu(cho, hom_nay)
 
-    # Lay lai cac movement DA_DONG_BO trong cua so de tinh lai tron ngay.
-    cu = q(
-        f"""
-        SELECT m.*
-        FROM `{PROJECT_ID}.{VH}.stock_movement_live` AS m
-        JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` AS n
-          ON n.movement_id = m.movement_id
-        WHERE n.trang_thai = 'DA_DONG_BO'
-          AND m.ngay >= DATE '{tu}'
-          AND m.ngay <= DATE '{han}'
-        """
-    )
-    if not cu.empty:
-        cu["ngay"] = pd.to_datetime(cu["ngay"]).dt.date
-        cu["sku"] = cu["sku"].fillna("").astype(str).str.strip().str.upper()
-
     # Snapshot goc phai la ngay truoc cua so tinh lai.
     inv_df = q(
         f"""
@@ -360,6 +355,23 @@ def main() -> None:
             f"Khong tim thay snapshot fact_inventory truoc ngay {tu}; dung de tranh tinh ton sai."
         )
     inv_cuoi = pd.to_datetime(inv_df.loc[0, "d"]).date()
+
+    # Lay lai movement da dong bo tu sau snapshot goc (khong chi tu ngay tu).
+    # Neu bo qua doan nay, ton dau ngay tu se thieu cac bien dong lich su.
+    cu = q(
+        f"""
+        SELECT m.*
+        FROM `{PROJECT_ID}.{VH}.stock_movement_live` AS m
+        JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` AS n
+          ON n.movement_id = m.movement_id
+        WHERE n.trang_thai = 'DA_DONG_BO'
+          AND m.ngay > DATE '{inv_cuoi}'
+          AND m.ngay <= DATE '{han}'
+        """
+    )
+    if not cu.empty:
+        cu["ngay"] = pd.to_datetime(cu["ngay"]).dt.date
+        cu["sku"] = cu["sku"].fillna("").astype(str).str.strip().str.upper()
 
     ton_cuoi = q(
         f"""
