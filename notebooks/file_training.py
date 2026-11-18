@@ -327,9 +327,21 @@ def do_quan_trong(mo_hinh, ten_cot):
     return kq.sort_values('quan_trong', ascending=False).reset_index(drop=True)
 
 # ---------- GỌI HÀM P18 ----------
-thong_tin = tinh_thong_tin_sku(hoc_d, d['sku'].unique())          # 1) số riêng từng món (từ phần học)
-mo_hinh = huan_luyen_lightgbm(hoc_d, chinh_d, thong_tin)           # 2) huấn luyện
-print('Số cây tối ưu (dừng sớm):', mo_hinh.best_iteration_)
+# Chế độ dự báo-only: tải mô hình đã huấn luyện từ cache của GitHub Actions.
+# Không gọi huan_luyen_lightgbm() trong các lần chạy 06:00 và 18:00.
+import os
+CHE_DO_PIPELINE = os.environ.get('PIPELINE_MODE', 'train_predict').strip().lower()
+if CHE_DO_PIPELINE == 'predict_only':
+    if not os.path.exists('lightgbm_ton_kho.joblib'):
+        raise FileNotFoundError('Không tìm thấy lightgbm_ton_kho.joblib từ lần huấn luyện gần nhất.')
+    _artifact = joblib.load('lightgbm_ton_kho.joblib')
+    mo_hinh = _artifact['mo_hinh']
+    thong_tin = _artifact['thong_tin']
+    print('Đã tải mô hình đã lưu; bỏ qua bước huấn luyện LightGBM.')
+else:
+    thong_tin = tinh_thong_tin_sku(hoc_d, d['sku'].unique())
+    mo_hinh = huan_luyen_lightgbm(hoc_d, chinh_d, thong_tin)
+    print('Số cây tối ưu (dừng sớm):', mo_hinh.best_iteration_)
 
 X_thi = tao_ma_tran_x(thi_d, thong_tin)                            # 3) dự đoán phần thi
 thi_d['du_doan_lgbm'] = mo_hinh.predict(X_thi)
