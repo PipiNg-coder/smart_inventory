@@ -36,9 +36,9 @@ jobs:
       # Cache dùng để mang model qua các runner độc lập.
       # Prefix restore giúp lần chạy 06:00/18:00 lấy model từ lần train gần nhất.
       - name: Restore saved model
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
-          path: notebooks/lightgbm_ton_kho.joblib
+          path: lightgbm_ton_kho.joblib
           key: shelfsense-model-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             shelfsense-model-
@@ -71,10 +71,18 @@ jobs:
 
       - name: Check saved model for predict-only mode
         if: env.PIPELINE_MODE == 'predict_only'
-        run: test -s notebooks/lightgbm_ton_kho.joblib || (echo "No saved model cache. Run train_predict first." && exit 1)
+        run: test -s lightgbm_ton_kho.joblib || (echo "No saved model cache. Run train_predict first." && exit 1)
 
       - name: Run pipeline
         run: python notebooks/run_pipeline.py
+
+      # Chỉ lưu cache mới sau lần huấn luyện. Các lần predict-only không ghi đè model cache.
+      - name: Save newly trained model
+        if: success() && env.PIPELINE_MODE == 'train_predict'
+        uses: actions/cache/save@v4
+        with:
+          path: lightgbm_ton_kho.joblib
+          key: shelfsense-model-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Remove credentials
         if: always()
