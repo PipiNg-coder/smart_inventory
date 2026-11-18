@@ -13,3 +13,12 @@ scikit-learn
 joblib
 matplotlib
 lunardate
+fastapi
+uvicorn[standard]
+pydantic>=2
+google-cloud-bigquery
+google-auth
+pandas
+db-dtypes
+pyarrow
+streamlit 
