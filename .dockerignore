@@ -1,0 +1,7 @@
+.venv
+__pycache__
+*.json
+.streamlit
+.env
+shelfsense.html
+app.py
