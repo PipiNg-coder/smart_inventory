@@ -1,52 +1,60 @@
-# ShelfSense – BigQuery Demo (local)
+# ShelfSense – một luồng duy nhất: giao diện → FastAPI → BigQuery
 
-## Kiến trúc
-- `app.py` (Streamlit) đọc sản phẩm, tồn live, dự báo từ BigQuery.
-- `api.py` (FastAPI) nhận phiếu từ trình duyệt.
-- `web_api.py` kiểm tra dữ liệu và gọi `utils/phieu.py`.
-- `utils/phieu.py` ghi vào đúng các bảng `van_hanh_v2.phieu_log`, `phieu_chi_tiet_log`, `stock_movement_live`.
-- `shelfsense.html` là giao diện gốc, giữ nguyên thiết kế và ảnh nhúng.
-
-## Cài đặt (Windows / VS Code)
-Mở Terminal tại thư mục chứa `app.py`:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r requirements.txt
 ```
+Trình duyệt (shelfsense.html trong Streamlit)
+        │  POST /api/phieu   (một hàm duy nhất: sendShelfSlipToBigQuery)
+        ▼
+FastAPI (api.py → web_api.py → utils/phieu.py)   kiểm tra dữ liệu, chống ghi trùng
+        │  ghi 3 bảng, ĐỌC LẠI để xác nhận đủ, rồi đọc tồn thật
+        ▼
+BigQuery (phieu_log, phieu_chi_tiet_log, stock_movement_live; v_ton_live là nguồn tồn)
+```
+BigQuery là nguồn sự thật: sau khi ghi thành công, giao diện hiển thị đúng **tồn do API đọc lại từ `v_ton_live`**, không tự cộng/trừ.
 
-Đặt Google credentials theo MỘT trong hai cách:
-1. Tạo `.streamlit/secrets.toml` từ `.streamlit/secrets.toml.example`, điền đầy đủ Service Account JSON fields; hoặc
-2. Thiết lập ADC bằng `gcloud auth application-default login`.
-
-Service Account cần quyền đọc các bảng/view analytics và quyền ghi vào 3 bảng vận hành nêu trên. Không đưa khóa JSON vào HTML hoặc GitHub.
-
-## Chạy ứng dụng
-Mở **Terminal 1**:
+## Chạy trên máy
 ```powershell
+# Terminal 1 – API
 uvicorn api:app --host 127.0.0.1 --port 8000
-```
-Kiểm tra `http://127.0.0.1:8000/health` trả `{"ok":true,...}`.
-
-Mở **Terminal 2**:
-```powershell
+# Terminal 2 – giao diện
 streamlit run app.py
+# Terminal 3 – kiểm tra
+python kiem_tra_api.py 8504          # thay 8504 bằng cổng Streamlit của bạn
 ```
-Mở `http://localhost:8501`.
 
-## Luồng phiếu đã nối
-- Nhập hàng → `NHAP`
-- Bán hàng → `BAN`
-- Trả hàng → `TRA_HANG`
-- Hủy hàng → `HUY` (Hết date/Lỗi trừ tồn; Đổi luôn/Đổi hàng cộng tồn)
+## Các luồng ghi phiếu (tất cả đi qua một hàm gửi duy nhất)
+| Màn hình | Loại phiếu | Tồn |
+|---|---|---|
+| Nhập hàng; Nhận hàng theo đơn đặt | `NHAP` | + |
+| Bán hàng (giỏ hàng) và form "Bán hàng" | `BAN` | − |
+| Trả hàng | `TRA_HANG` | + |
+| Hủy hàng – Hết date / Lỗi | `HUY` | − |
+| Hủy hàng – Đổi luôn / Đổi hàng | `HUY` | + (quy tắc nằm ở `utils/phieu.py`, giao diện dùng cùng quy tắc) |
+Luồng cũ `submitTransaction()` (chỉ sửa trong trình duyệt) giờ chuyển sang luồng chung; `receiveOrder` cũ đã ngừng dùng; `app.py` không còn chèn script gửi phiếu thứ hai.
 
-Sau khi API xác nhận ghi thành công, giao diện mới cập nhật tồn tại phiên trình duyệt. Tải lại app sẽ đọc tồn live từ BigQuery.
+## Chống ghi dở và ghi trùng
+- Mỗi lần bấm xác nhận có một mã sự kiện; mất mạng/quá hạn rồi bấm lại dùng **đúng mã đó**, API không ghi trùng.
+- Ghi lần lượt 3 bảng (bảng làm đổi tồn ghi cuối). Sau khi ghi, API **đọc lại** cả 3 bảng; thiếu bảng nào thì trả lỗi "ghi dở dang" (không báo thành công). Gửi lại đúng phiếu đó chỉ ghi phần còn thiếu.
+- BigQuery load job không phải một giao dịch nguyên tử. Cách thay thế là `BEGIN TRANSACTION` + `INSERT` (cần dự án bật thanh toán, không dùng được ở BigQuery sandbox), hiện chưa dùng.
 
-## Giới hạn quan trọng cần biết
-- Đây là cấu hình demo chạy trên **cùng máy**. API chỉ bind `127.0.0.1`; không dùng cấu hình này để public Internet hoặc triển khai GitHub/Streamlit Cloud. Nếu public, phải bổ sung đăng nhập/xác thực thật ở server.
-- `phieu.py` hiện ghi 3 bảng bằng 3 BigQuery load jobs nối tiếp, không phải một transaction nguyên tử. Nếu job giữa chừng lỗi, cần đối soát log trước khi gửi lại.
-- Bản này nối nút tạo phiếu ở màn hình nghiệp vụ chính. Các luồng legacy khác (checkout/nhận đơn mua/kiểm kê) chưa được chuyển sang API này; không dùng chúng để ghi tồn thực.
-- Lịch sử hiển thị trong giao diện hiện là dữ liệu phiên trình duyệt, chưa có endpoint đọc lịch sử phiếu từ BigQuery. Nguồn tồn live khi tải lại vẫn lấy từ BigQuery.
-- Chưa chạy kiểm thử end-to-end với project BigQuery thật trong môi trường tạo file này; cần chạy thử mỗi loại phiếu với SKU test.
+## Triển khai (Streamlit Cloud + FastAPI riêng, ví dụ Cloud Run)
+1. Thư mục `utils/` của API cần có cả `bigquery_client.py` của bạn và `phieu.py` bản mới. Cloud Run gắn Service Account cho dịch vụ nên **không cần file JSON**; cấp quyền *BigQuery Data Editor* và *BigQuery Job User*.
+2. Triển khai API:
+   ```bash
+   gcloud run deploy shelfsense-api --source . --region asia-southeast1 --allow-unauthenticated \
+     --set-env-vars SHELFSENSE_ALLOWED_ORIGINS=https://TEN-APP.streamlit.app,SHELFSENSE_API_KEY=CHUOI_NGAU_NHIEN_DAI
+   ```
+3. Streamlit Cloud → Settings → Secrets (mẫu: `secrets.toml.example`): `[api] base_url = "https://…run.app"`, `key = "CHUOI_NGAU_NHIEN_DAI"`.
+4. Kiểm tra: `python kiem_tra_api.py https://TEN-APP.streamlit.app https://…run.app`, rồi `python kiem_thu_phieu.py --sku SKU001 --api https://…run.app --key …`.
+
+## Bảo mật – điều cần hiểu đúng
+- **Khóa API nằm trong trang**, nên ai xem được trang đều đọc được khóa. Nó chỉ chặn người lạ không mở được app. Muốn an toàn thật cần giới hạn người dùng của chính app Streamlit (hoặc đăng nhập thật ở server API).
+- Không đưa `service-account.json` vào GitHub hay JavaScript (`.gitignore` đã chặn `*.json` và `secrets.toml`).
+- API chỉ chấp nhận trang từ domain khai báo trong `SHELFSENSE_ALLOWED_ORIGINS`.
+
+## Kiểm thử
+- `python kiem_thu_phieu.py --sku SKU001` – chạy thật từ API đến BigQuery: nhập +1, gửi lại 2 lần (không ghi trùng), hủy −1, vượt tồn bị từ chối; tồn cuối trở về như ban đầu.
+- `python kiem_tra_api.py` – API chạy chưa, BigQuery/quyền, CORS, khóa API.
+
+## Còn lại cần biết
+- Lịch sử hiển thị trong giao diện vẫn là dữ liệu trình duyệt; tồn là số thật từ BigQuery khi tải lại và sau mỗi phiếu.
+- Tồn live phản ánh ngay; số bán cho dự báo chỉ vào mô hình sau khi script 07 chạy.

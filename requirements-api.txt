@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic>=2
+google-cloud-bigquery
+google-auth
+pandas
+db-dtypes
+pyarrow
+streamlit   # utils/bigquery_client.py dùng st.cache_resource / st.secrets
