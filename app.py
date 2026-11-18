@@ -530,7 +530,6 @@ API_BASE = _cau_hinh(
     "base_url",
     "https://smart-inventory-jfy7.onrender.com"
 ).rstrip("/")
-st.write("API đang sử dụng:", API_BASE)
 # Khóa API nằm trong trang nên người xem trang đều đọc được: chỉ có tác dụng khi bản thân app Streamlit đã bị giới hạn người dùng.
 API_KEY = _cau_hinh("SHELFSENSE_API_KEY", "api", "key", "")
 
