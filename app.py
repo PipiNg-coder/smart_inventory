@@ -524,7 +524,13 @@ def _cau_hinh(bien_moi_truong: str, muc: str, khoa: str, mac_dinh: str = "") -> 
 
 # Địa chỉ API ghi phiếu (FastAPI). Chạy trên máy: mặc định http://127.0.0.1:8000.
 # Triển khai: đặt trong .streamlit/secrets.toml  ->  [api]  base_url = "https://ten-api.run.app"  key = "..."
-API_BASE = _cau_hinh("SHELFSENSE_API_BASE", "api", "base_url", "http://127.0.0.1:8000").rstrip("/")
+API_BASE = _cau_hinh(
+    "SHELFSENSE_API_BASE",
+    "api",
+    "base_url",
+    "https://smart-inventory-jfy7.onrender.com"
+).rstrip("/")
+st.write("API đang sử dụng:", API_BASE)
 # Khóa API nằm trong trang nên người xem trang đều đọc được: chỉ có tác dụng khi bản thân app Streamlit đã bị giới hạn người dùng.
 API_KEY = _cau_hinh("SHELFSENSE_API_KEY", "api", "key", "")
 
