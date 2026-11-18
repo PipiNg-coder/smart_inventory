@@ -2,20 +2,18 @@ name: Train and Predict (00:00 and 12:00 VN)
 
 on:
   schedule:
-    - cron: '0 5,17 * * *'   # 05:00 và 17:00 UTC = 12:00 và 00:00 giờ Việt Nam
+    # 05:00 and 17:00 UTC = 12:00 and 00:00 Vietnam time
+    - cron: '0 5,17 * * *'
   workflow_dispatch:
     inputs:
-      ghi_that:
-        description: 'Ghi thật phiếu vào BigQuery (bỏ chọn = chỉ xem trước bước đồng bộ)'
-        type: boolean
-        default: false
       chay_mo_hinh:
-        description: 'Chạy huấn luyện + dự báo (ghi đè các bảng dự báo)'
+        description: 'Run model training and forecast, then write forecast tables to BigQuery'
         type: boolean
+        required: true
         default: true
 
 concurrency:
-  group: shelfsense-bigquery-write   # dùng chung với workflow đồng bộ để không chạy chồng
+  group: shelfsense-bigquery-write
   cancel-in-progress: false
 
 jobs:
@@ -30,7 +28,7 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install ML dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-ml.txt
@@ -39,20 +37,14 @@ jobs:
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GCP_SA_KEY }}
         run: |
-          echo "$GOOGLE_CREDENTIALS" > "$RUNNER_TEMP/gcp_key.json"
+          test -n "$GOOGLE_CREDENTIALS" || (echo "Missing GitHub Secret GCP_SA_KEY" && exit 1)
+          printf '%s' "$GOOGLE_CREDENTIALS" > "$RUNNER_TEMP/gcp_key.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp_key.json" >> "$GITHUB_ENV"
 
-      - name: Đồng bộ phiếu kho (script 07)
-        env:
-          CHI_XEM_TRUOC: ${{ (github.event_name == 'schedule' || inputs.ghi_that) && '0' || '1' }}
-          GOM_PHIEU_HOM_NAY: '1'      # gom cả hôm nay; script 07 tự tính lại các ngày chưa đủ nên không lệch tồn kho
-          XAC_NHAN_GHI_THAT: '1'
-        run: python scripts/07_dong_bo_phieu_sua.py
-
-      - name: Huấn luyện + dự báo (cùng một tiến trình)
+      - name: Train model and generate forecasts
         if: github.event_name == 'schedule' || inputs.chay_mo_hinh
         run: python notebooks/run_pipeline.py
 
-      - name: Xóa khóa
+      - name: Remove credentials
         if: always()
         run: rm -f "$RUNNER_TEMP/gcp_key.json"
