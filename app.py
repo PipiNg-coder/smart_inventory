@@ -347,7 +347,7 @@ def load_products(sql: str = SQL) -> list[dict]:
                 "category": r.nhom if isinstance(r.nhom, str) and r.nhom else "Chưa phân loại",
                 "price": int(_so(r.gia_ban, _so(r.gia_von))),  # giá bán, thiếu thì dùng giá vốn
                 "costPrice": int(_so(r.gia_von)),               # giá vốn (cột "Giá vốn" của trang sản phẩm)
-                "stock": int(round(_so(r.ton_live, _so(r.ton_hien_tai)))),  # tồn live, GIỮ NGUYÊN số âm để người dùng thấy
+                "stock": _so(r.ton_live, _so(r.ton_hien_tai)),  # tồn live, GIỮ NGUYÊN số âm để người dùng thấy
                 "min": int(round(_so(r.ton_toi_thieu))),
                 "supplier": _chu(r.ma_nha_cung_cap),
                 "forecast7": int(round(_so(r.du_bao_7))),
