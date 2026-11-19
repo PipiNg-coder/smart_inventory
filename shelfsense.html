@@ -755,6 +755,7 @@ async function sendShelfSlipToBigQuery(data){
    throw new Error(typeof detail==='string'?detail:JSON.stringify(detail));
  }
  window.__shelfPendingBigQuerySlip=null;
+ if(typeof syncHistoryV1==='function')setTimeout(()=>syncHistoryV1(),1500);
  return body;
 }
 function dongBoTonTuBigQuery(result,lines){
@@ -778,7 +779,7 @@ let cart=[];function cartAdd(){let sku=document.getElementById('sellSku').value,
  window.__shelfBigQueryBusy=true;
  try{
    const result=await sendShelfSlipToBigQuery(payload);
-   const id='HD'+Date.now().toString().slice(-7);
+   const id=result.ma_phieu?('HD'+String(result.ma_phieu).slice(3,11).toUpperCase()):('HD'+Date.now().toString().slice(-7));
    dongBoTonTuBigQuery(result,items.map(x=>({sku:x.sku,delta:-x.qty})));
    items.forEach(x=>{
      state.movements.push({id:result.ma_phieu||('MV'+Date.now()),date:ngay,sku:x.sku,type:'Bán hàng',qty:-x.qty,note:id});
@@ -1230,7 +1231,7 @@ async function saveInventoryActionV4(e,type){
    let label={receive:'Nhập hàng',issue:'Bán hàng',returned:'Trả hàng',canceled:'Hủy hàng'}[type];
    let invoiceId='';
    if(type==='issue'){
-     invoiceId='HD'+Date.now().toString().slice(-7);
+     invoiceId=String(id).startsWith('PB')?('HD'+String(id).slice(3,11).toUpperCase()):('HD'+Date.now().toString().slice(-7));
      state.invoices=state.invoices||[];
      state.invoices.push({id:invoiceId,date:ngay,time:localDateTime(),items:[{sku:p.sku,qty:q,price:Number(p.price)||0}],total:q*(Number(p.price)||0),source:'Phiếu bán hàng (bản xem tại trình duyệt)',bq:true,bqMa:id,bqAt:new Date().toISOString()});
    }
@@ -1396,6 +1397,52 @@ function render(){
   root.innerHTML=`<div class="card"><h3>Không thể tải nội dung trang</h3><p class="explain">${esc(err&&err.message?err.message:String(err))}</p><button class="btn btn-primary" onclick="render()">Thử tải lại</button></div>`;
  }
 }
+
+/* ===== ĐỒNG BỘ LỊCH SỬ PHIẾU TỪ BIGQUERY (mọi trình duyệt / thiết bị thấy cùng dữ liệu) =====
+   Trước đây hóa đơn và lịch sử bán/nhập/trả/hủy chỉ lưu trong localStorage của từng trình duyệt.
+   Nay BigQuery là nguồn sự thật: lúc mở trang lấy bản app.py nhúng sẵn, sau đó tự làm mới qua GET /api/lich-su. */
+function applyHistoryV1(h){
+ if(!h||!Array.isArray(h.invoices)||!Array.isArray(h.movements))return false;
+ const map=new Map(state.products.map(p=>[String(p.sku).trim().toUpperCase(),p.sku]));
+ const fix=k=>map.get(String(k).trim().toUpperCase())||k;
+ state.invoices=h.invoices.map(i=>({...i,items:(i.items||[]).map(x=>({...x,sku:fix(x.sku)}))}));
+ state.movements=h.movements.map(m=>({...m,sku:fix(m.sku)}));
+ if(h.ton_live){for(const k of Object.keys(h.ton_live)){const p=byId(fix(k)),v=Number(h.ton_live[k]);if(p&&Number.isFinite(v))p.stock=qtyR(v);}}
+ return true;
+}
+let __histSigV1='';
+async function syncHistoryV1(){
+ const cfg=window.__SHELFSENSE__;
+ if(!cfg||window.__shelfHistBusy||window.__shelfBigQueryBusy)return;
+ const base=String(cfg.apiBase||'').replace(/\/+$/,'');if(!base)return;
+ window.__shelfHistBusy=true;
+ const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),45000);
+ try{
+  const headers={};if(cfg.apiKey)headers['X-API-Key']=cfg.apiKey;
+  const r=await fetch(base+'/api/lich-su',{headers,signal:ac.signal,cache:'no-store'});
+  const b=await r.json();
+  if(!r.ok||b.ok!==true)throw new Error(b.detail||('HTTP '+r.status));
+  if(window.__shelfBigQueryBusy)return;
+  const tonSig=JSON.stringify(b.ton_live||{});
+  const sig=b.tong_phieu+'|'+b.invoices.length+'|'+b.movements.length+'|'+((b.movements[b.movements.length-1]||{}).id||'')+'|'+tonSig;
+  if(sig===__histSigV1)return;
+  __histSigV1=sig;
+  if(!applyHistoryV1(b))return;
+  // Không render khi người dùng đang gõ / có giỏ hàng, tránh mất dữ liệu đang nhập; dữ liệu mới sẽ hiện ở lần vẽ lại kế tiếp
+  const ae=document.activeElement,typing=ae&&/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName);
+  if(!typing&&!(Array.isArray(cart)&&cart.length))render();
+ }catch(err){console.warn('Chưa làm mới được lịch sử phiếu:',err&&err.message?err.message:err);}
+ finally{clearTimeout(tm);window.__shelfHistBusy=false;}
+}
+(function(){
+ const B=window.__SHELFSENSE__;if(!B)return;
+ if(B.history&&applyHistoryV1(B.history)){
+  __histSigV1=B.history.tong_phieu+'|'+B.history.invoices.length+'|'+B.history.movements.length+'|'+((B.history.movements[B.history.movements.length-1]||{}).id||'')+'|'+JSON.stringify(B.history.ton_live||{});
+ }
+ setTimeout(()=>syncHistoryV1(),2000);
+ setInterval(()=>{if(document.visibilityState==='visible')syncHistoryV1();},30000);
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')syncHistoryV1();});
+})();
 
 render();
 
