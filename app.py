@@ -325,6 +325,12 @@ def _so(x, mac_dinh=0.0):
         return mac_dinh
 
 
+def _sl(x, mac_dinh=0.0):
+    """Số lượng hàng hóa: giữ tối đa 3 số lẻ (rau củ quả bán theo kg); số nguyên thì trả về int."""
+    v = round(_so(x, mac_dinh), 3)
+    return int(v) if v == int(v) else v
+
+
 def _chu(x) -> str:
     return x if isinstance(x, str) else ""
 
@@ -347,8 +353,8 @@ def load_products(sql: str = SQL) -> list[dict]:
                 "category": r.nhom if isinstance(r.nhom, str) and r.nhom else "Chưa phân loại",
                 "price": int(_so(r.gia_ban, _so(r.gia_von))),  # giá bán, thiếu thì dùng giá vốn
                 "costPrice": int(_so(r.gia_von)),               # giá vốn (cột "Giá vốn" của trang sản phẩm)
-                "stock": _so(r.ton_live, _so(r.ton_hien_tai)),  # tồn live, GIỮ NGUYÊN số âm để người dùng thấy
-                "min": int(round(_so(r.ton_toi_thieu))),
+                "stock": _sl(r.ton_live, _so(r.ton_hien_tai)),  # tồn live, GIỮ NGUYÊN số âm để người dùng thấy
+                "min": _sl(r.ton_toi_thieu),
                 "supplier": _chu(r.ma_nha_cung_cap),
                 "forecast7": int(round(_so(r.du_bao_7))),
                 "forecast30": int(round(_so(r.du_bao_30))),
@@ -365,12 +371,12 @@ def load_products(sql: str = SQL) -> list[dict]:
                     "alert": _chu(r.muc_canh_bao),             # DA_HET_HANG, SAP_HET_7_NGAY, ...
                     "reorder": int(_so(r.nen_nhap_goi_y)),       # số lượng nên nhập gợi ý (7 ngày)
                     "reorder30": int(_so(r.nen_nhap_du_30_ngay)),  # số lượng nên nhập đủ 30 ngày
-                    "incoming": int(_so(r.hang_dang_ve)),        # hàng đang về
+                    "incoming": _sl(r.hang_dang_ve),        # hàng đang về
                     "daysLeft": round(_so(r.so_ngay_ton_kho, -1), 1),  # -1 = không có
                     "holiday7": _chu(r.dip_trong_7),
                     "holiday30": _chu(r.dip_trong_30),
                     "tiedCapital": int(_so(r.tien_dong_von)),    # tiền vốn bị kẹt (VNĐ)
-                    "max": int(round(_so(r.ton_toi_da))),        # tồn tối đa theo chính sách
+                    "max": _sl(r.ton_toi_da),        # tồn tối đa theo chính sách
                     "top50": bool(r.la_top50) if not _trong(r.la_top50) else False,  # thuộc top 50 SKU
                     "abc": _chu(r.nhom_abcxyz),                  # nhóm ABC-XYZ
                     "excessQty": int(_so(r.so_luong_nen_xa)),    # số lượng nên đẩy đi (tồn quá nhiều)
@@ -468,7 +474,7 @@ def load_meta() -> dict:
         dtop = doc_bang(SQL_TOP_SOLD)
         top_sold = {"7": [], "30": []}
         for r in dtop.itertuples(index=False):
-            top_sold.setdefault(str(int(_so(r.ky))), []).append([str(r.sku), int(round(_so(r.qty)))])
+            top_sold.setdefault(str(int(_so(r.ky))), []).append([str(r.sku), _sl(r.qty)])
         meta["topSold"] = top_sold
     except Exception:
         pass
