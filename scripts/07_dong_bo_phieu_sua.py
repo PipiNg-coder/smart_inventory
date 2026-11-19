@@ -515,7 +515,7 @@ def main() -> None:
             run_row, table_run, job_config=cfg_run
         ).result()
 
-        print("\\nDONG BO THANH CONG bang BigQuery Load Jobs (khong dung DML).")
+        print("\nDONG BO THANH CONG bang BigQuery Load Jobs (khong dung DML).")
         print("Lich su fact_sales/fact_inventory va cac movement goc duoc giu nguyen.")
         print("Luu y: BigQuery khong co transaction nguyen tu cho nhieu Load Jobs.")
     except Exception:
