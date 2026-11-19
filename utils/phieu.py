@@ -252,19 +252,37 @@ def _ghi(ma, pb, loai, hanh_dong, trang_thai, ly_do, nguoi, doi_tac, la_thu, don
         )
 
 
-def _chuan_ngay(ngay) -> str:
-    """Ngày phiếu (yyyy-mm-dd). Bỏ trống = hôm nay. Không nhận ngày tương lai hoặc trước NGAY_BAT_DAU_PHIEU."""
+def _chuan_ngay(ngay, cho_phep_lich_su=False) -> str:
+    """
+    Chuẩn hóa ngày phiếu.
+    - Phiếu thông thường: từ 09/11/2026.
+    - Phiếu lịch sử được cấp quyền: từ 29/10/2026.
+    - Không nhận ngày tương lai.
+    """
     hom_nay = datetime.now(VN).date()
+
     if ngay in (None, ""):
         return hom_nay.isoformat()
+
     try:
         d = ngay if isinstance(ngay, date) else date.fromisoformat(str(ngay)[:10])
-    except ValueError:
+    except (ValueError, TypeError):
         raise ValueError(f"Ngày phiếu không hợp lệ: {ngay}")
+
     if d > hom_nay:
         raise ValueError("Ngày phiếu không được ở tương lai")
-    if d < NGAY_BAT_DAU_PHIEU:
-        raise ValueError(f"Ngày phiếu phải từ {NGAY_BAT_DAU_PHIEU:%d/%m/%Y} trở đi")
+
+    ngay_toi_thieu = (
+        date(2026, 10, 29)
+        if cho_phep_lich_su
+        else NGAY_BAT_DAU_PHIEU
+    )
+
+    if d < ngay_toi_thieu:
+        raise ValueError(
+            f"Ngày phiếu phải từ {ngay_toi_thieu:%d/%m/%Y} trở đi"
+        )
+
     return d.isoformat()
 
 
@@ -296,6 +314,7 @@ def tao_phieu(
     ghi_chu="",
     ngay=None,
     ma_phieu=None,
+    cho_phep_lich_su=False,
 ):
     """Tạo phiếu mới, trả về mã phiếu.
 
@@ -317,7 +336,10 @@ def tao_phieu(
         loi = _kiem_tra(loai, dong, ly_do=ly_do)
         if loi:
             raise ValueError("; ".join(loi))
-    ngay_s = _chuan_ngay(ngay)
+    ngay_s = _chuan_ngay(
+        ngay,
+        cho_phep_lich_su=cho_phep_lich_su,
+    )
     dau = dau_phieu(loai, ly_do)
     bay_gio = datetime.now(VN)
     ma = ma_phieu or f"{TIEN_TO[loai]}{bay_gio.strftime('%y%m%d%H%M%S')}_{uuid4().hex[:8].upper()}"
