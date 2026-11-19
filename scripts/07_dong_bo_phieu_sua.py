@@ -52,7 +52,7 @@ def env_bool(name: str, default: bool) -> bool:
 
 
 GOM_PHIEU_HOM_NAY = env_bool("GOM_PHIEU_HOM_NAY", True)
-CHI_XEM_TRUOC = env_bool("CHI_XEM_TRUOC", False)
+CHI_XEM_TRUOC = env_bool("CHI_XEM_TRUOC", True)
 XAC_NHAN_GHI_THAT = env_bool("XAC_NHAN_GHI_THAT", True)
 
 
@@ -393,6 +393,16 @@ def main() -> None:
     sku_la = kh["sku_la"]
     trang_thai = kh["trang_thai"]
     that = kh["that"]
+
+    # Ghi nhat ky cho TAT CA movement trong dot: ca dong bo thanh cong va cac dong bi bo qua.
+    # View v_ton_live dua vao nhat_ky_dong_bo de khong cong lai cac dong da xu ly.
+    run_id = uuid.uuid4().hex
+    nk = pd.DataFrame({
+        "movement_id": cho["movement_id"].astype(str),
+        "dong_bo_luc": pd.Timestamp.now(tz="UTC"),
+        "dot_chay": run_id,
+        "trang_thai": trang_thai,
+    })
     fs = kh["fs"]
     fi = kh["fi"]
     ton_moi = kh["ton_moi"]
