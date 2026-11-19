@@ -265,7 +265,7 @@ REAL_NOTICE = (
 )
 
 
-APP_VERSION = "v4.7 (một luồng ghi phiếu: giao diện → API → BigQuery)"
+APP_VERSION = "v4.8 (lịch sử phiếu đồng bộ BigQuery giữa mọi thiết bị)"
 
 
 def _client_tu_utils():
@@ -517,6 +517,14 @@ def load_suppliers() -> list[dict]:
     return out
 
 
+@st.cache_data(ttl=15, show_spinner=False)
+def load_history() -> dict:
+    """Lịch sử hóa đơn + biến động kho từ BigQuery (để mọi trình duyệt/thiết bị thấy cùng một lịch sử)."""
+    from utils.lich_su import lich_su_phieu
+
+    return lich_su_phieu()
+
+
 def _cau_hinh(bien_moi_truong: str, muc: str, khoa: str, mac_dinh: str = "") -> str:
     """Đọc cấu hình: biến môi trường trước, rồi st.secrets[muc][khoa], cuối cùng là giá trị mặc định."""
     v = os.environ.get(bien_moi_truong)
@@ -540,7 +548,7 @@ API_BASE = _cau_hinh(
 API_KEY = _cau_hinh("SHELFSENSE_API_KEY", "api", "key", "")
 
 
-def patch_html(html: str, products: list[dict], meta: dict, suppliers: list[dict] | None = None) -> str:
+def patch_html(html: str, products: list[dict], meta: dict, suppliers: list[dict] | None = None, history: dict | None = None) -> str:
     data = json.dumps(products, ensure_ascii=False).replace("</", "<\\/")
     html, n = re.subn(
         r"const initialProducts=\[.*?\}\];",
@@ -565,7 +573,7 @@ def patch_html(html: str, products: list[dict], meta: dict, suppliers: list[dict
     html = html.replace("Số liệu demo", "Dữ liệu thực tế từ BigQuery")
 
     # Báo cho shelfsense.html biết đang chạy với dữ liệu BigQuery (bật các trang dự báo/cảnh báo thật).
-    payload = {"meta": meta, "suppliers": suppliers or [], "apiBase": API_BASE, "apiKey": API_KEY}
+    payload = {"meta": meta, "suppliers": suppliers or [], "apiBase": API_BASE, "apiKey": API_KEY, "history": history}
     script = (
         "<script>window.__SHELFSENSE__="
         + json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
@@ -628,7 +636,12 @@ try:
         suppliers = load_suppliers()
     except Exception:
         suppliers = []
-    html = patch_html(html, products, meta, suppliers)
+    try:
+        history = load_history()
+    except Exception as exc_ls:  # không đọc được lịch sử thì giao diện tự thử lại qua API
+        history = None
+        st.toast(f"Không đọc được lịch sử phiếu: {type(exc_ls).__name__}", icon="⚠️")
+    html = patch_html(html, products, meta, suppliers, history)
     so_sp = f"{len(products):,}".replace(",", ".")
     nhan = (
         '<div style="position:fixed;right:10px;bottom:8px;z-index:99998;background:#ffffffcc;color:#527b45;'
