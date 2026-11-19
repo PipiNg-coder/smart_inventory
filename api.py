@@ -1,4 +1,6 @@
 """ShelfSense local demo API. Bind to 127.0.0.1 only; never expose publicly without authentication."""
+import time
+
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -70,6 +72,7 @@ def tao_phieu_endpoint(request: TaoPhieuRequest, x_api_key: str | None = Header(
         payload = request.model_dump()
         payload["dong"] = [x.model_dump() for x in request.dong]
         result = xu_ly_su_kien(payload)
+        _CACHE_LICH_SU["data"] = None  # có phiếu mới: bỏ bộ nhớ đệm lịch sử
         if not result.get("ok"):
             raise HTTPException(status_code=422, detail=result.get("loi", "Không tạo được phiếu"))
         return {
@@ -98,5 +101,29 @@ def doc_ton(skus: str, x_api_key: str | None = Header(default=None)):
     try:
         from utils.phieu import ton_live_cua
         return {"ok": True, "ton_live": ton_live_cua(ds)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
+
+
+# Bộ nhớ đệm ngắn: nhiều máy cùng tự làm mới mỗi 30 giây thì chỉ truy vấn BigQuery tối đa 1 lần / 10 giây
+_CACHE_LICH_SU = {"t": 0.0, "n": 0, "data": None}
+
+
+@app.get("/api/lich-su")
+def lich_su(toi_da: int = 3000, x_api_key: str | None = Header(default=None)):
+    """Lịch sử hóa đơn + biến động kho (bán/nhập/trả/hủy) đọc từ BigQuery, dùng chung cho mọi trình duyệt/thiết bị."""
+    kiem_tra_khoa(x_api_key)
+    if LOI_KHOI_DONG:
+        raise HTTPException(status_code=503, detail=f"API chưa sẵn sàng: {LOI_KHOI_DONG}")
+    toi_da = max(1, min(int(toi_da), 10000))
+    now = time.time()
+    c = _CACHE_LICH_SU
+    if c["data"] is not None and c["n"] == toi_da and now - c["t"] < 10:
+        return c["data"]
+    try:
+        from utils.lich_su import lich_su_phieu
+        data = {"ok": True, **lich_su_phieu(toi_da)}
+        c.update(t=now, n=toi_da, data=data)
+        return data
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
