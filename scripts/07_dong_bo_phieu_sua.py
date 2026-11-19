@@ -39,7 +39,7 @@ VH = "van_hanh_v2"
 NGAY_DU_LIEU_THAT_CUOI = date(2026, 10, 28)
 
 # Chi dong bo cac phieu web tu ngay nay tro di.
-NGAY_BAT_DAU_PHIEU = date(2026, 11, 9)
+NGAY_BAT_DAU_PHIEU = date(2026, 10, 29)
 
 VN = ZoneInfo("Asia/Ho_Chi_Minh")
 
