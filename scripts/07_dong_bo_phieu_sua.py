@@ -438,117 +438,95 @@ def main() -> None:
         print("Bang nguon stock_movement_live duoc giu nguyen.")
         return
 
-    # Tao staging tables rieng; neu nap staging loi thi Mart chua bi dong cham.
-    run_id = datetime.now(VN).strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
-    prefix = f"{PROJECT_ID}.{VH}._tmp_sync_{run_id}"
-    st_fs = prefix + "_fact_sales"
-    st_fi = prefix + "_fact_inventory"
-    st_ton = prefix + "_ton_hien_tai"
-    st_nk = prefix + "_nhat_ky"
+    # BigQuery free tier khong cho phep DML. Dung Load Jobs (WRITE_TRUNCATE/WRITE_APPEND)
+    # thay cho DELETE/INSERT/MERGE. Doc day du bang dich de giu nguyen lich su.
+    # Concurrency cua workflow phai giu cancel-in-progress=false.
+    table_fs = f"{PROJECT_ID}.{MART}.fact_sales"
+    table_fi = f"{PROJECT_ID}.{MART}.fact_inventory"
+    table_ton = f"{PROJECT_ID}.{MART}.ton_hien_tai"
+    table_nk = f"{PROJECT_ID}.{VH}.nhat_ky_dong_bo"
+    table_run = f"{PROJECT_ID}.{VH}.lan_chay_mo_hinh"
 
-    SF = bigquery.SchemaField
-    schema_fs = [
-        SF("ngay", "DATE"),
-        SF("sku", "STRING"),
-        SF("so_luong_ban", "FLOAT64"),
-        SF("gia_tb", "FLOAT64"),
-        SF("co_khuyen_mai", "INT64"),
-    ]
-    schema_fi = [
-        SF("ngay", "DATE"),
-        SF("sku", "STRING"),
-        SF("ton_cuoi_ngay", "FLOAT64"),
-        SF("het_hang", "INT64"),
-    ]
-    schema_ton = [
-        SF("sku", "STRING"),
-        SF("ton_cuoi_ngay", "FLOAT64"),
-        SF("hang_dang_ve", "INT64"),
-    ]
-    nk = pd.DataFrame(
-        {
-            "movement_id": cho["movement_id"].astype(str),
-            "dong_bo_luc": pd.Timestamp.now(tz="UTC"),
-            "dot_chay": run_id,
-            "trang_thai": trang_thai,
-        }
-    )
-    schema_nk = [
-        SF("movement_id", "STRING"),
-        SF("dong_bo_luc", "TIMESTAMP"),
-        SF("dot_chay", "STRING"),
-        SF("trang_thai", "STRING"),
-    ]
+    # Lay schema that tu BigQuery, khong tu y doi kieu cot.
+    schemas = {
+        table_fs: client.get_table(table_fs).schema,
+        table_fi: client.get_table(table_fi).schema,
+        table_ton: client.get_table(table_ton).schema,
+        table_nk: client.get_table(table_nk).schema,
+        table_run: client.get_table(table_run).schema,
+    }
 
+    fs_old = q(f"SELECT * FROM `{table_fs}`")
+    fi_old = q(f"SELECT * FROM `{table_fi}`")
+    nk_old = q(f"SELECT * FROM `{table_nk}`")
+
+    # Chi thay the phan ngay bi anh huong; toan bo lich su ngoai cua so duoc giu.
+    fs_old["ngay"] = pd.to_datetime(fs_old["ngay"]).dt.date
+    fi_old["ngay"] = pd.to_datetime(fi_old["ngay"]).dt.date
+    fs_keep = fs_old[~fs_old["ngay"].between(tu, han)].copy()
+    fi_keep = fi_old[~fi_old["ngay"].between(tu, han)].copy()
+    fs_all = pd.concat([fs_keep, fs], ignore_index=True)
+    fi_all_full = pd.concat([fi_keep, fi_all], ignore_index=True)
+
+    # Nhat ky la bang dedup theo movement_id; giu nguyen cac dong da co.
+    nk_all = pd.concat([nk_old, nk], ignore_index=True)
+    nk_all = nk_all.drop_duplicates(subset=["movement_id"], keep="first")
+
+    now_utc = pd.Timestamp.now(tz="UTC")
+    run_row = pd.DataFrame([{
+        "thoi_diem_chay": now_utc,
+        "loai": "DONG_BO",
+        "ngay_du_lieu_cuoi": han,
+        "trang_thai": "THANH_CONG",
+        "ghi_chu": f"{len(that)} movement hop le; run_id={run_id}",
+    }])
+
+    def load_replace(table_id: str, frame: pd.DataFrame) -> None:
+        cfg = bigquery.LoadJobConfig(
+            schema=schemas[table_id],
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        )
+        client.load_table_from_dataframe(frame, table_id, job_config=cfg).result()
+
+    # Backup trong bo nho de phuc hoi neu mot load job that bai giua chung.
+    # Khong co lenh SQL DML nao duoc su dung.
+    backups = {
+        table_fs: fs_old,
+        table_fi: fi_old,
+        table_ton: ton.copy(),
+        table_nk: nk_old,
+    }
+    changed = []
     try:
-        load_stage(client, st_fs, fs, schema_fs)
-        load_stage(client, st_fi, fi_all, schema_fi)
-        load_stage(client, st_ton, ton_moi, schema_ton)
-        load_stage(client, st_nk, nk, schema_nk)
+        load_replace(table_fs, fs_all)
+        changed.append(table_fs)
+        load_replace(table_fi, fi_all_full)
+        changed.append(table_fi)
+        load_replace(table_ton, ton_moi)
+        changed.append(table_ton)
+        load_replace(table_nk, nk_all)
+        changed.append(table_nk)
 
-        # Mot transaction duy nhat: hoac tat ca bang dich cung cap nhat,
-        # hoac khong bang dich nao bi thay doi.
-        sql = f"""
-        BEGIN TRANSACTION;
+        cfg_run = bigquery.LoadJobConfig(
+            schema=schemas[table_run],
+            write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        )
+        client.load_table_from_dataframe(
+            run_row, table_run, job_config=cfg_run
+        ).result()
 
-        DELETE FROM `{PROJECT_ID}.{MART}.fact_sales`
-        WHERE ngay BETWEEN @tu AND @han;
-
-        INSERT INTO `{PROJECT_ID}.{MART}.fact_sales`
-          (ngay, sku, so_luong_ban, gia_tb, co_khuyen_mai)
-        SELECT ngay, sku, so_luong_ban, gia_tb, co_khuyen_mai
-        FROM `{st_fs}`;
-
-        DELETE FROM `{PROJECT_ID}.{MART}.fact_inventory`
-        WHERE ngay BETWEEN @tu AND @han;
-
-        INSERT INTO `{PROJECT_ID}.{MART}.fact_inventory`
-          (ngay, sku, ton_cuoi_ngay, het_hang)
-        SELECT ngay, sku, ton_cuoi_ngay, het_hang
-        FROM `{st_fi}`;
-
-        DELETE FROM `{PROJECT_ID}.{MART}.ton_hien_tai`
-        WHERE TRUE;
-
-        INSERT INTO `{PROJECT_ID}.{MART}.ton_hien_tai`
-          (sku, ton_cuoi_ngay, hang_dang_ve)
-        SELECT sku, ton_cuoi_ngay, hang_dang_ve
-        FROM `{st_ton}`;
-
-        MERGE `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` AS T
-        USING `{st_nk}` AS S
-        ON T.movement_id = S.movement_id
-        WHEN NOT MATCHED THEN
-          INSERT (movement_id, dong_bo_luc, dot_chay, trang_thai)
-          VALUES (S.movement_id, S.dong_bo_luc, S.dot_chay, S.trang_thai);
-
-        INSERT INTO `{PROJECT_ID}.{VH}.lan_chay_mo_hinh`
-          (thoi_diem_chay, loai, ngay_du_lieu_cuoi, trang_thai, ghi_chu)
-        VALUES
-          (CURRENT_TIMESTAMP(), 'DONG_BO', @han, 'THANH_CONG',
-           @ghi_chu);
-
-        COMMIT TRANSACTION;
-        """
-        params = [
-            bigquery.ScalarQueryParameter("tu", "DATE", tu),
-            bigquery.ScalarQueryParameter("han", "DATE", han),
-            bigquery.ScalarQueryParameter(
-                "ghi_chu", "STRING",
-                f"{len(that)} movement hop le; run_id={run_id}",
-            ),
-        ]
-        run_query(client, sql, params)
-        print("\nDONG BO THANH CONG: cac bang Mart va nhat ky da cap nhat trong mot transaction.")
-        print("Bang nguon stock_movement_live khong bi xoa hoac sua.")
-
-    finally:
-        # Staging co expiration 24h; thu don som neu co the.
-        for table_id in [st_fs, st_fi, st_ton, st_nk]:
+        print("\\nDONG BO THANH CONG bang BigQuery Load Jobs (khong dung DML).")
+        print("Lich su fact_sales/fact_inventory va cac movement goc duoc giu nguyen.")
+        print("Luu y: BigQuery khong co transaction nguyen tu cho nhieu Load Jobs.")
+    except Exception:
+        # Neu loi duoc bat trong cung tien trinh, khoi phuc cac bang da ghi.
+        # Workflow khong duoc cancel giua cac buoc; xem concurrency ben duoi.
+        for table_id in reversed(changed):
             try:
-                client.delete_table(table_id, not_found_ok=True)
-            except Exception as exc:
-                print(f"Canh bao: chua xoa duoc staging {table_id}: {exc}")
+                load_replace(table_id, backups[table_id])
+            except Exception as restore_error:
+                print(f"CANH BAO: khong khoi phuc duoc {table_id}: {restore_error}")
+        raise
 
 
 if __name__ == "__main__":
