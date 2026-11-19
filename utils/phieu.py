@@ -25,7 +25,7 @@ LOAI_HOP_LE = tuple(TIEN_TO)
 LY_DO_HUY_CONG = {"doi luon", "doi hang"}  # hủy kiểu đổi hàng: hàng quay về kho nên cộng tồn
 
 # Phiếu có ngày trước ngày này không được nhận (script 07 chỉ tin phiếu web từ ngày này).
-NGAY_BAT_DAU_PHIEU = date(2026, 11, 9)
+NGAY_BAT_DAU_PHIEU = date(2026, 10, 29)
 
 
 _CLIENT_ADC = None
@@ -255,7 +255,7 @@ def _ghi(ma, pb, loai, hanh_dong, trang_thai, ly_do, nguoi, doi_tac, la_thu, don
 def _chuan_ngay(ngay, cho_phep_lich_su=False) -> str:
     """
     Chuẩn hóa ngày phiếu.
-    - Phiếu thông thường: từ 09/11/2026.
+    - Phiếu thông thường: từ 29/10/2026.
     - Phiếu lịch sử được cấp quyền: từ 29/10/2026.
     - Không nhận ngày tương lai.
     """
