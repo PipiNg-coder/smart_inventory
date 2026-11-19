@@ -4,11 +4,12 @@
 #
 # NGUYEN TAC:
 # 1. KHONG xoa/sua bat ky du lieu nao trong stock_movement_live.
-# 2. Nap du lieu vao bang staging truoc; kiem tra xong moi ghi Mart.
-# 3. Cap nhat fact_sales, fact_inventory, ton_hien_tai va nhat_ky_dong_bo
-#    trong CUNG MOT BigQuery transaction. Neu loi, transaction rollback.
-# 4. Dung MERGE cho nhat_ky_dong_bo theo movement_id de tranh ghi trung.
-# 5. Mac dinh CHI_XEM_TRUOC=True; khong ghi that neu chua bat co xac nhan.
+# 2. Kiem tra du lieu truoc khi ghi; giu nguyen lich su cac bang Mart.
+# 3. Dung BigQuery Load Jobs (WRITE_TRUNCATE/WRITE_APPEND), khong dung DML
+#    de phu hop project chua bat Billing.
+# 4. Ghep nhat_ky_dong_bo theo movement_id de tranh ghi trung khi chay lai.
+# 5. Neu load job loi trong cung tien trinh, co gang khoi phuc cac bang da ghi.
+# 6. Mac dinh CHI_XEM_TRUOC=True; khong ghi that neu chua bat co xac nhan.
 #
 # Chay:
 #   python 07_dong_bo_phieu_sua.py
