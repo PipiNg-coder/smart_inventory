@@ -50,9 +50,8 @@ jobs:
 
       - name: Dong bo du lieu BigQuery (script 07)
         env:
-          # Tam thoi tat ghi that cho lich tu dong trong luc kiem thu.
-          # Chi chay ghi that khi dispatch thu cong va tick ghi_that.
-          CHI_XEM_TRUOC: ${{ inputs.ghi_that && '0' || '1' }}
+          # Lich tu dong ghi that; chay thu cong van tuy chon ghi_that.
+          CHI_XEM_TRUOC: ${{ github.event_name == 'schedule' && '0' || (inputs.ghi_that && '0' || '1') }}
           XAC_NHAN_GHI_THAT: "1"
           GOM_PHIEU_HOM_NAY: "1"
         run: python scripts/07_dong_bo_phieu_sua.py
