@@ -364,13 +364,23 @@ def main() -> None:
                  CONCAT('ROW_', TO_HEX(SHA256(TO_JSON_STRING(m)))) AS row_key,
                  COUNT(*) OVER (PARTITION BY m.movement_id) AS so_dong_cung_id
           FROM `{PROJECT_ID}.{VH}.stock_movement_live` m
+        ),
+        processed AS (
+          SELECT s.row_key
+          FROM src s
+          JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` n
+            ON n.movement_id = s.row_key
+          UNION DISTINCT
+          SELECT s.row_key
+          FROM src s
+          JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` n
+            ON n.movement_id = CAST(s.movement_id AS STRING)
+          WHERE s.so_dong_cung_id = 1
         )
         SELECT s.*
         FROM src s
-        LEFT JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` n
-          ON n.movement_id = s.row_key
-          OR (s.so_dong_cung_id = 1 AND n.movement_id = CAST(s.movement_id AS STRING))
-        WHERE n.movement_id IS NULL
+        LEFT JOIN processed p ON p.row_key = s.row_key
+        WHERE p.row_key IS NULL
           AND s.ngay <= DATE '{han}'
         """
     )
@@ -416,13 +426,23 @@ def main() -> None:
                  CONCAT('ROW_', TO_HEX(SHA256(TO_JSON_STRING(m)))) AS row_key,
                  COUNT(*) OVER (PARTITION BY m.movement_id) AS so_dong_cung_id
           FROM `{PROJECT_ID}.{VH}.stock_movement_live` m
+        ),
+        processed AS (
+          SELECT s.row_key, n.trang_thai
+          FROM src s
+          JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` n
+            ON n.movement_id = s.row_key
+          UNION DISTINCT
+          SELECT s.row_key, n.trang_thai
+          FROM src s
+          JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` n
+            ON n.movement_id = CAST(s.movement_id AS STRING)
+          WHERE s.so_dong_cung_id = 1
         )
         SELECT s.*
         FROM src s
-        JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` n
-          ON n.movement_id = s.row_key
-          OR (s.so_dong_cung_id = 1 AND n.movement_id = CAST(s.movement_id AS STRING))
-        WHERE n.trang_thai = 'DA_DONG_BO'
+        JOIN processed p ON p.row_key = s.row_key
+        WHERE p.trang_thai = 'DA_DONG_BO'
           AND s.ngay > DATE '{inv_cuoi}'
           AND s.ngay <= DATE '{han}'
         """
