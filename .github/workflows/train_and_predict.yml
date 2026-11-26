@@ -15,13 +15,21 @@ on:
         options:
           - train_predict
           - predict_only
+      xac_nhan_ghi_that:
+        description: 'Xác nhận đã kiểm thử đồng bộ và cho phép ghi thật + chạy ML'
+        type: boolean
+        required: true
+        default: false
 
 concurrency:
   group: shelfsense-bigquery-write
   cancel-in-progress: false
 
 jobs:
+  # Tam thoi chi cho phep chay khi dispatch thu cong va co xac nhan ro rang.
+  # Trigger cron van giu nguyen, nhung job se duoc skip cho den khi kiem thu xong.
   train-predict:
+    if: github.event_name == 'workflow_dispatch' && inputs.xac_nhan_ghi_that
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
