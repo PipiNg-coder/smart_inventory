@@ -69,6 +69,17 @@ jobs:
           printf '%s' "$GOOGLE_CREDENTIALS" > "$RUNNER_TEMP/gcp_key.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp_key.json" >> "$GITHUB_ENV"
 
+      # Luon dong bo giao dich moi truoc khi doc Mart de train/du bao.
+      # Neu dong bo that bai (vi du movement_id cu bi trung), workflow dung tai day.
+      # Script chi doc nguon va chi ghi Mart/nhat_ky khi validate thanh cong;
+      # khong sua/xoa stock_movement_live.
+      - name: Sync operational data to Mart before ML
+        env:
+          CHI_XEM_TRUOC: "0"
+          XAC_NHAN_GHI_THAT: "1"
+          GOM_PHIEU_HOM_NAY: "1"
+        run: python scripts/07_dong_bo_phieu_sua.py
+
       - name: Check saved model for predict-only mode
         if: env.PIPELINE_MODE == 'predict_only'
         run: test -s lightgbm_ton_kho.joblib || (echo "No saved model cache. Run train_predict first." && exit 1)
