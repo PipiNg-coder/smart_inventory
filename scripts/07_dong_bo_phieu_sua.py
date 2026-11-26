@@ -7,7 +7,7 @@
 # 2. Kiem tra du lieu truoc khi ghi; giu nguyen lich su cac bang Mart.
 # 3. Dung BigQuery Load Jobs (WRITE_TRUNCATE/WRITE_APPEND), khong dung DML
 #    de phu hop project chua bat Billing.
-# 4. Ghep nhat_ky_dong_bo theo movement_id de tranh ghi trung khi chay lai.
+# 4. Dung khoa SHA256 theo tung dong nguon; movement_id co the trung.
 # 5. Neu load job loi trong cung tien trinh, co gang khoi phuc cac bang da ghi.
 # 6. Mac dinh CHI_XEM_TRUOC=True; khong ghi that neu chua bat co xac nhan.
 #
@@ -228,8 +228,12 @@ def validate_plan(
 
     if cho["movement_id"].isna().any() or cho["movement_id"].astype(str).str.strip().eq("").any():
         raise ValueError("Co movement_id rong/NULL; dung truoc khi dong bo.")
-    if cho["movement_id"].duplicated().any():
-        raise ValueError("stock_movement_live co movement_id trung; can xu ly nguon truoc.")
+    if "row_key" not in cho.columns:
+        raise ValueError("Nguon thieu row_key; dung de tranh dong bo sai.")
+    if cho["row_key"].isna().any() or cho["row_key"].astype(str).str.strip().eq("").any():
+        raise ValueError("Co row_key rong/NULL; dung truoc khi dong bo.")
+    if cho["row_key"].duplicated().any():
+        raise ValueError("row_key bi trung; khong the phan biet tung dong nguon an toan.")
 
     if fs.duplicated(["ngay", "sku"]).any():
         raise ValueError("fact_sales staging bi trung khoa (ngay, sku).")
@@ -313,38 +317,61 @@ def main() -> None:
     for table_id in required_tables:
         client.get_table(table_id)
 
-    # Kiem tra toan bo nguon truoc khi loc cac movement da co trong nhat ky.
-    # Neu chi kiem tra "cho", mot movement_id trung da co trong nhat ky co the
-    # bi LEFT JOIN loai het va lam bo sot giao dich ma khong phat hien.
-    trung_nguon = q(
+    # Chi chan movement_id rong/NULL. Trung movement_id duoc phep vi moi dong
+    # co row_key SHA256 rieng tao tu TO_JSON_STRING(toan bo dong nguon).
+    id_rong = q(
         f"""
-        SELECT CAST(movement_id AS STRING) AS movement_id, COUNT(*) AS so_dong
+        SELECT CAST(movement_id AS STRING) AS movement_id
         FROM `{PROJECT_ID}.{VH}.stock_movement_live`
-        GROUP BY movement_id
-        HAVING movement_id IS NULL
-            OR TRIM(CAST(movement_id AS STRING)) = ''
-            OR COUNT(*) > 1
-        ORDER BY so_dong DESC
+        WHERE movement_id IS NULL OR TRIM(CAST(movement_id AS STRING)) = ''
         LIMIT 20
         """
     )
-    if not trung_nguon.empty:
-        mau = trung_nguon.to_dict(orient="records")
+    if not id_rong.empty:
+        raise ValueError(f"stock_movement_live co movement_id rong/NULL: {id_rong.to_dict(orient='records')}")
+
+    # Neu journal cu co movement_id goc cho mot ID dang trung, khong the biet
+    # dong nao da duoc tinh. Dung an toan de doi soat, khong tu dong tinh lai.
+    legacy_mo_ho = q(
+        f"""
+        WITH src AS (
+          SELECT CAST(m.movement_id AS STRING) AS movement_id,
+                 COUNT(*) OVER (PARTITION BY m.movement_id) AS so_dong
+          FROM `{PROJECT_ID}.{VH}.stock_movement_live` m
+        )
+        SELECT DISTINCT s.movement_id
+        FROM src s
+        JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` n
+          ON n.movement_id = s.movement_id
+        WHERE s.so_dong > 1
+          AND NOT STARTS_WITH(n.movement_id, 'ROW_')
+        LIMIT 20
+        """
+    )
+    if not legacy_mo_ho.empty:
         raise ValueError(
-            "stock_movement_live co movement_id rong/NULL hoac trung trong toan bo nguon. "
-            "Khong tu dong sua/xoa du lieu cu; can doi soat thu cong truoc khi dong bo. "
-            f"Mau loi: {mau}"
+            "Phat hien movement_id trung da co nhat ky cu dang legacy; "
+            "khong the xac dinh dong nao da dong bo. Dung de doi soat: "
+            f"{legacy_mo_ho.to_dict(orient='records')}"
         )
 
-    # Chua dong bo: doc nguon; khong co lenh DELETE/UPDATE nao tren bang nguon.
+    # Tinh row_key bang BigQuery tren toan bo dong; giu movement_id goc.
+    # Legacy journal movement_id chi duoc dung lam fallback neu ID nguon la duy nhat.
     cho = q(
         f"""
-        SELECT m.*
-        FROM `{PROJECT_ID}.{VH}.stock_movement_live` AS m
-        LEFT JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` AS n
-          ON n.movement_id = m.movement_id
+        WITH src AS (
+          SELECT m.*,
+                 CONCAT('ROW_', TO_HEX(SHA256(TO_JSON_STRING(m)))) AS row_key,
+                 COUNT(*) OVER (PARTITION BY m.movement_id) AS so_dong_cung_id
+          FROM `{PROJECT_ID}.{VH}.stock_movement_live` m
+        )
+        SELECT s.*
+        FROM src s
+        LEFT JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` n
+          ON n.movement_id = s.row_key
+          OR (s.so_dong_cung_id = 1 AND n.movement_id = CAST(s.movement_id AS STRING))
         WHERE n.movement_id IS NULL
-          AND m.ngay <= DATE '{han}'
+          AND s.ngay <= DATE '{han}'
         """
     )
 
@@ -384,13 +411,20 @@ def main() -> None:
     # Neu bo qua doan nay, ton dau ngay tu se thieu cac bien dong lich su.
     cu = q(
         f"""
-        SELECT m.*
-        FROM `{PROJECT_ID}.{VH}.stock_movement_live` AS m
-        JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` AS n
-          ON n.movement_id = m.movement_id
+        WITH src AS (
+          SELECT m.*,
+                 CONCAT('ROW_', TO_HEX(SHA256(TO_JSON_STRING(m)))) AS row_key,
+                 COUNT(*) OVER (PARTITION BY m.movement_id) AS so_dong_cung_id
+          FROM `{PROJECT_ID}.{VH}.stock_movement_live` m
+        )
+        SELECT s.*
+        FROM src s
+        JOIN `{PROJECT_ID}.{VH}.nhat_ky_dong_bo` n
+          ON n.movement_id = s.row_key
+          OR (s.so_dong_cung_id = 1 AND n.movement_id = CAST(s.movement_id AS STRING))
         WHERE n.trang_thai = 'DA_DONG_BO'
-          AND m.ngay > DATE '{inv_cuoi}'
-          AND m.ngay <= DATE '{han}'
+          AND s.ngay > DATE '{inv_cuoi}'
+          AND s.ngay <= DATE '{han}'
         """
     )
     if not cu.empty:
@@ -421,7 +455,8 @@ def main() -> None:
     # View v_ton_live dua vao nhat_ky_dong_bo de khong cong lai cac dong da xu ly.
     run_id = uuid.uuid4().hex
     nk = pd.DataFrame({
-        "movement_id": cho["movement_id"].astype(str),
+        # movement_id trong journal luu row_key de moi dong nguon co danh tinh rieng.
+        "movement_id": cho["row_key"].astype(str),
         "dong_bo_luc": pd.Timestamp.now(tz="UTC"),
         "dot_chay": run_id,
         "trang_thai": trang_thai,
