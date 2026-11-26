@@ -313,6 +313,29 @@ def main() -> None:
     for table_id in required_tables:
         client.get_table(table_id)
 
+    # Kiem tra toan bo nguon truoc khi loc cac movement da co trong nhat ky.
+    # Neu chi kiem tra "cho", mot movement_id trung da co trong nhat ky co the
+    # bi LEFT JOIN loai het va lam bo sot giao dich ma khong phat hien.
+    trung_nguon = q(
+        f"""
+        SELECT CAST(movement_id AS STRING) AS movement_id, COUNT(*) AS so_dong
+        FROM `{PROJECT_ID}.{VH}.stock_movement_live`
+        GROUP BY movement_id
+        HAVING movement_id IS NULL
+            OR TRIM(CAST(movement_id AS STRING)) = ''
+            OR COUNT(*) > 1
+        ORDER BY so_dong DESC
+        LIMIT 20
+        """
+    )
+    if not trung_nguon.empty:
+        mau = trung_nguon.to_dict(orient="records")
+        raise ValueError(
+            "stock_movement_live co movement_id rong/NULL hoac trung trong toan bo nguon. "
+            "Khong tu dong sua/xoa du lieu cu; can doi soat thu cong truoc khi dong bo. "
+            f"Mau loi: {mau}"
+        )
+
     # Chua dong bo: doc nguon; khong co lenh DELETE/UPDATE nao tren bang nguon.
     cho = q(
         f"""
