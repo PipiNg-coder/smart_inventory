@@ -235,7 +235,9 @@ def _ghi(ma, pb, loai, hanh_dong, trang_thai, ly_do, nguoi, doi_tac, la_thu, don
             "stock_movement_live",
             [
                 {
-                    "movement_id": f"{ma}_v{pb}_{s}",
+                    # UUID riêng cho từng dòng biến động, tránh trùng khi nhiều máy tạo phiếu đồng thời.
+                    # ma_phieu vẫn ổn định để chống ghi lại cùng một sự kiện.
+                    "movement_id": f"MV_{uuid4().hex.upper()}",
                     "thoi_diem": ts,
                     "ngay": ngay,
                     "ma_phieu": ma,
